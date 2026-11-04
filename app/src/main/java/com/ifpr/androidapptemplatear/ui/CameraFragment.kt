@@ -1,8 +1,10 @@
+
 package com.ifpr.androidapptemplatear.ui
 
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -79,6 +81,9 @@ class CameraFragment : Fragment() {
     private var availabilityJob: Job? = null
     private var arWatchdogJob: Job? = null
     private var cameraWatchdogJob: Job? = null
+
+    // Reprodução de áudio
+    private var mediaPlayer: MediaPlayer? = null
 
     private var generation = 0
     private var modelGeneration = 0
@@ -210,9 +215,53 @@ class CameraFragment : Fragment() {
     }
 
     /**
-     * Identificação por características comuns de emuladores.
-     * Por escolha deste aplicativo, eles iniciam sem ARCore.
+     * Reproduz o áudio quando o modelo termina de carregar.
      */
+    private fun playModelSound() {
+        stopModelSound()
+
+        try {
+            mediaPlayer = MediaPlayer.create(
+                requireContext(),
+                R.raw.som_carregamento
+            )
+
+            mediaPlayer?.apply {
+                setOnCompletionListener { player ->
+                    player.release()
+
+                    if (mediaPlayer === player) {
+                        mediaPlayer = null
+                    }
+                }
+
+                start()
+            }
+
+        } catch (_: Exception) {
+            stopModelSound()
+        }
+    }
+
+    /**
+     * Interrompe e libera o áudio atual.
+     */
+    private fun stopModelSound() {
+        mediaPlayer?.let { player ->
+            runCatching {
+                player.setOnCompletionListener(null)
+
+                if (player.isPlaying) {
+                    player.stop()
+                }
+
+                player.release()
+            }
+        }
+
+        mediaPlayer = null
+    }
+
     private fun isEmulator(): Boolean {
         return Build.FINGERPRINT.startsWith("generic") ||
                 Build.FINGERPRINT.startsWith("unknown") ||
@@ -230,7 +279,6 @@ class CameraFragment : Fragment() {
     private fun checkAvailability() {
         availabilityJob?.cancel()
 
-        // Não tenta iniciar ARCore no emulador.
         if (isEmulator()) {
             requestMode(useAr = false)
             return
@@ -407,11 +455,6 @@ class CameraFragment : Fragment() {
         }
     }
 
-    /**
-     * Troca automaticamente quando o ARCore não consegue rastrear.
-     * Conta somente o tempo em que a tela está em primeiro plano.
-     * A ausência de uma superfície, sozinha, não provoca a troca.
-     */
     private fun startArWatchdog(expected: Int) {
         arWatchdogJob?.cancel()
 
@@ -514,7 +557,6 @@ class CameraFragment : Fragment() {
         val expected = generation
         val owner = viewLifecycleOwner
 
-        // O prazo também cobre a obtenção do CameraProvider.
         startCameraWatchdog(expected)
 
         try {
@@ -646,6 +688,9 @@ class CameraFragment : Fragment() {
         loadJob?.cancel()
         removeModel()
 
+        // Para o áudio do modelo anterior.
+        stopModelSound()
+
         val expected = generation
         val expectedModel = ++modelGeneration
         val isAr = mode == Mode.AR
@@ -684,6 +729,9 @@ class CameraFragment : Fragment() {
                     scene.addChildNode(node)
                     placeButton?.isEnabled = true
                 }
+
+                // SOM: executado somente após carregar o modelo.
+                playModelSound()
 
             } catch (e: CancellationException) {
                 throw e
@@ -796,6 +844,9 @@ class CameraFragment : Fragment() {
         loadJob?.cancel()
         loadJob = null
 
+        // Libera o áudio ao trocar a cena.
+        stopModelSound()
+
         cameraPreview?.let { preview ->
             runCatching {
                 cameraProvider?.unbind(preview)
@@ -835,6 +886,9 @@ class CameraFragment : Fragment() {
     override fun onDestroyView() {
         availabilityJob?.cancel()
         availabilityJob = null
+
+        // Garante que o áudio seja liberado ao sair da tela.
+        stopModelSound()
 
         clearScene()
 
