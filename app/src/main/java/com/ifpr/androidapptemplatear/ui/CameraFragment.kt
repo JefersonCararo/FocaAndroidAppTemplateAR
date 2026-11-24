@@ -918,4 +918,6 @@ class CameraFragment : Fragment() {
 
         super.onDestroyView()
     }
+
+
 }
